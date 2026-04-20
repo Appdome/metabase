@@ -281,6 +281,125 @@
               (assert (#{:allow-all :allow-private :external-only} (keyword new-value))))
             (setting/set-value-of-type! :keyword :oidc-allowed-networks new-value)))
 
+;;;
+;;; Azure AD (Microsoft Entra ID) SSO via OIDC
+;;;
+
+(def ^:private multi-tenant-azure-aliases
+  "Azure endpoint names that span more than a single tenant. Rejected — Metabase only
+   supports single-tenant Azure SSO so that the OIDC issuer check pins logins to the
+   configured directory."
+  #{"common" "organizations" "consumers"})
+
+(defsetting azure-tenant-id
+  (deferred-tru "Directory (tenant) ID (GUID) of the Microsoft Entra ID tenant used for Azure SSO.")
+  :encryption :when-encryption-key-set
+  :visibility :public
+  :audit      :getter
+  :setter     (fn [new-value]
+                (when (and new-value (contains? multi-tenant-azure-aliases new-value))
+                  (throw (ex-info (tru "Multi-tenant Azure endpoints ({0}) are not supported. Set a specific tenant GUID." new-value)
+                                  {:status-code 400})))
+                (setting/set-value-of-type! :string :azure-tenant-id new-value)))
+
+(defsetting azure-client-id
+  (deferred-tru "Application (client) ID of the Azure app registration used for Metabase SSO.")
+  :encryption :when-encryption-key-set
+  :visibility :public
+  :audit      :getter)
+
+(defsetting azure-client-secret
+  (deferred-tru "Client secret configured on the Azure app registration.")
+  :encryption :when-encryption-key-set
+  :sensitive? true
+  :export?    false
+  :audit      :no-value)
+
+(defsetting azure-attribute-email
+  (deferred-tru (str "Claim to use as the user''s email. Default ''preferred_username''; "
+                     "set to ''email'' if the tenant emits a verified ''email'' claim."))
+  :default    "preferred_username"
+  :encryption :no
+  :audit      :getter)
+
+(defsetting azure-attribute-firstname
+  (deferred-tru "Claim to use as the user''s first name.")
+  :default    "given_name"
+  :encryption :no
+  :audit      :getter)
+
+(defsetting azure-attribute-lastname
+  (deferred-tru "Claim to use as the user''s last name.")
+  :default    "family_name"
+  :encryption :no
+  :audit      :getter)
+
+(defsetting azure-attribute-groups
+  (deferred-tru "Claim containing the list of Azure AD group object IDs the user belongs to.")
+  :default    "groups"
+  :encryption :no
+  :audit      :getter)
+
+(defsetting azure-group-sync
+  (deferred-tru "Enable group membership synchronization from Azure AD.")
+  :type    :boolean
+  :default false
+  :audit   :getter)
+
+(defsetting azure-group-mappings
+  (deferred-tru "JSON mapping of Azure AD group object IDs to Metabase group IDs.")
+  :encryption :no
+  :type       :json
+  :cache?     false
+  :default    {}
+  :audit      :getter
+  ;; Azure group object IDs are UUID-style strings; preserve them verbatim as
+  ;; map keys instead of letting the default JSON getter turn them into keywords.
+  :getter     (fn []
+                (when-let [raw (setting/get-value-of-type :string :azure-group-mappings)]
+                  (json/decode raw)))
+  :setter     (fn [new-value]
+                (cond
+                  (nil? new-value)
+                  (setting/set-value-of-type! :json :azure-group-mappings nil)
+
+                  (string? new-value)
+                  (setting/set-value-of-type! :string :azure-group-mappings new-value)
+
+                  (map? new-value)
+                  (setting/set-value-of-type! :string :azure-group-mappings (json/encode new-value))
+
+                  :else
+                  (throw (ex-info (tru "Invalid Azure group mappings: expected a JSON object.")
+                                  {:status-code 400})))))
+
+(defsetting azure-user-provisioning-enabled?
+  (deferred-tru "Automatically create a Metabase account for Azure-authenticated users that don''t yet have one.")
+  :type    :boolean
+  :default true
+  :audit   :getter)
+
+(defsetting azure-auth-configured
+  (deferred-tru "Are the mandatory Azure SSO settings configured?")
+  :type   :boolean
+  :setter :none
+  :getter (fn [] (boolean (and (azure-tenant-id)
+                               (azure-client-id)
+                               (azure-client-secret)))))
+
+(defsetting azure-auth-enabled
+  (deferred-tru "Is Azure AD single sign-on currently enabled?")
+  :visibility :public
+  :type       :boolean
+  :default    false
+  :audit      :getter
+  :setter     (fn [new-value]
+                (let [new-value (boolean new-value)]
+                  (when (and new-value (not (azure-auth-configured)))
+                    (throw (ex-info (tru "Azure SSO is not configured. Set tenant ID, client ID, and client secret first.")
+                                    {:status-code 400})))
+                  (setting/set-value-of-type! :boolean :azure-auth-enabled new-value))))
+
 (defn- ee-sso-configured? []
   (when config/ee-available?
     (setting/get :other-sso-enabled?)))
@@ -289,6 +408,7 @@
   "Any SSO provider is configured and enabled"
   []
   (or (google-auth-enabled)
+      (azure-auth-enabled)
       (ldap-enabled)
       (ee-sso-configured?)))
 
@@ -300,6 +420,7 @@
   (boolean
    (case (keyword sso-source)
      :google (google-auth-enabled)
+     :azure  (azure-auth-enabled)
      :ldap   (ldap-enabled)
      ;; Enterprise SSO providers: setting/get respects the :feature flag on each
      ;; setting — returning the default (false) when the feature is unlicensed (e.g.,

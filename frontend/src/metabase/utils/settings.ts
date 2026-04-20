@@ -119,6 +119,13 @@ class MetabaseSettings {
   }
 
   /**
+   * @deprecated use getSetting(state, "azure-auth-enabled")
+   */
+  isAzureAuthEnabled() {
+    return this.get("azure-auth-enabled");
+  }
+
+  /**
    * @deprecated use getSetting(state, "ldap-enabled")
    */
   isLdapEnabled() {

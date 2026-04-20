@@ -18,6 +18,8 @@
    [metabase.sso.azure :as sso.azure]
    ;; side-effect require: registers :provider/oidc hierarchy + methods
    [metabase.sso.providers.oidc]
+   [metabase.sso.settings :as sso.settings]
+   [metabase.util.i18n :refer [tru]]
    [metabase.util.log :as log]
    [methodical.core :as methodical]))
 
@@ -25,18 +27,29 @@
 
 (derive :provider/azure :provider/oidc)
 
+(defn- strip-nil-vals
+  "Remove keys whose values are nil. Used to keep `update-user!` from clobbering
+   stored `first_name` / `last_name` with nil when Azure omits the corresponding
+   optional claims (admin forgot to enable `given_name` / `family_name` in the
+   token configuration)."
+  [m]
+  (into {} (remove (comp nil? val)) m))
+
 (defn- post-process-authentication-result
   "Post-process the result of an OIDC authentication so Azure-specific conventions
-   are applied — `sso_source` becomes `:azure` and the provider-id is the
-   tenant-wide immutable `oid` claim (falling back to `sub`).
+   are applied — `sso_source` becomes `:azure`, the provider-id is the tenant-wide
+   immutable `oid` claim (falling back to `sub`), and absent claims do not turn
+   into nil overwrites of existing user fields.
 
    Expects the `:claims` shape produced by `metabase.sso.providers.oidc/authenticate`
    on a successful callback. Initiate-flow and failure results pass through."
   [result]
   (if (and (:success? result) (:claims result))
-    (let [stamped (assoc-in result [:user-data :sso_source] :azure)
-          pid     (sso.azure/claim-provider-id (:claims result))]
-      (cond-> stamped
+    (let [pid (sso.azure/claim-provider-id (:claims result))]
+      (cond-> (update result :user-data
+                      (fn [user-data]
+                        (-> (strip-nil-vals user-data)
+                            (assoc :sso_source :azure))))
         pid (assoc-in [:user-data :provider-id] pid)
         pid (assoc :provider-id pid)))
     result))
@@ -47,6 +60,19 @@
         request' (cond-> request
                    cfg (assoc :oidc-config cfg))]
     (post-process-authentication-result (next-method provider request'))))
+
+(methodical/defmethod auth-identity/login! :before :provider/azure
+  [_provider request]
+  ;; Refuse to auto-create a Metabase account when provisioning is disabled.
+  ;; The generic `:around login!` populates `:user-data` (from authenticate) and
+  ;; looks `:user` up by email; if `:user-data` is set but `:user` is nil, the
+  ;; next step would be `create-user!` from the `::create-user-if-not-exists`
+  ;; mixin. Throw before that happens.
+  (when (and (:user-data request)
+             (not (:user request))
+             (not (sso.settings/azure-user-provisioning-enabled?)))
+    (throw (ex-info (tru "You don''t have a Metabase account yet. Ask your administrator to invite you.")
+                    {:status-code 401}))))
 
 (methodical/defmethod auth-identity/login! :around :provider/azure
   [provider request]

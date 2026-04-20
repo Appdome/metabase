@@ -16,24 +16,37 @@
    [metabase.util.log :as log]
    [toucan2.core :as t2]))
 
+(defn- client-secret-status
+  "Distinguish three states without ever leaking the secret:
+   - `:configured`   — secret on file and decrypted cleanly
+   - `:not-set`      — env var unset
+   - `:decode-error` — value present but failed to decrypt (likely
+                       MB_ENCRYPTION_SECRET_KEY mismatch)"
+  []
+  (try
+    (if (sso.settings/azure-client-secret) :configured :not-set)
+    (catch Throwable e
+      (log/warn e "Azure client secret could not be read")
+      :decode-error)))
+
 #_{:clj-kondo/ignore [:metabase/validate-defendpoint-has-response-schema]}
 (api.macros/defendpoint :get "/settings"
   "Return the current Azure SSO configuration. Env-managed fields (tenant ID,
    client ID, client secret, master enable switch) are reported read-only."
   [_route-params _query-params _body]
   (api/check-superuser)
-  {:azure-auth-configured           (sso.settings/azure-auth-configured)
-   :azure-auth-enabled              (sso.settings/azure-auth-enabled)
-   :azure-tenant-id                 (sso.settings/azure-tenant-id)
-   :azure-client-id                 (sso.settings/azure-client-id)
-   ;; never return the raw client secret; just report whether one is on file
-   :azure-client-secret-configured? (boolean (sso.settings/azure-client-secret))
-   :azure-attribute-email           (sso.settings/azure-attribute-email)
-   :azure-attribute-firstname       (sso.settings/azure-attribute-firstname)
-   :azure-attribute-lastname        (sso.settings/azure-attribute-lastname)
-   :azure-attribute-groups          (sso.settings/azure-attribute-groups)
-   :azure-group-sync                (sso.settings/azure-group-sync)
-   :azure-group-mappings            (sso.settings/azure-group-mappings)
+  {:azure-auth-configured            (sso.settings/azure-auth-configured)
+   :azure-auth-enabled               (sso.settings/azure-auth-enabled)
+   :azure-tenant-id                  (sso.settings/azure-tenant-id)
+   :azure-client-id                  (sso.settings/azure-client-id)
+   ;; never return the raw client secret; report state only
+   :azure-client-secret-status       (client-secret-status)
+   :azure-attribute-email            (sso.settings/azure-attribute-email)
+   :azure-attribute-firstname        (sso.settings/azure-attribute-firstname)
+   :azure-attribute-lastname         (sso.settings/azure-attribute-lastname)
+   :azure-attribute-groups           (sso.settings/azure-attribute-groups)
+   :azure-group-sync                 (sso.settings/azure-group-sync)
+   :azure-group-mappings             (sso.settings/azure-group-mappings)
    :azure-user-provisioning-enabled? (sso.settings/azure-user-provisioning-enabled?)})
 
 #_{:clj-kondo/ignore [:metabase/validate-defendpoint-has-response-schema]}
@@ -42,8 +55,8 @@
    master enable switch are read-only here — they are configured via environment
    variables and cannot be mutated at runtime.
 
-   Callers should send the complete desired configuration; any field omitted
-   here (or sent as `null`) is cleared back to its default."
+   Only fields present in the request body are updated. Omitted fields keep
+   their current value; pass an explicit `null` to reset a field to its default."
   [_route-params
    _query-params
    body :- [:map

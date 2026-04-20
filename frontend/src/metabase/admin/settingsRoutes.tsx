@@ -9,6 +9,7 @@ import {
 } from "metabase/plugins";
 
 import { GoogleAuthForm } from "./settings/auth/components/GoogleAuthForm";
+import { SettingsAzureForm } from "./settings/auth/components/SettingsAzureForm";
 import { SettingsLdapForm } from "./settings/components/SettingsLdapForm";
 import { SettingsNav } from "./settings/components/SettingsNav";
 import { AppearanceSettingsPage } from "./settings/components/SettingsPages/AppearanceSettingsPage";
@@ -52,6 +53,7 @@ export const getSettingsRoutes = () => (
       component={() => <AuthenticationSettingsPage tab="api-keys" />}
     />
     <Route path="authentication/google" component={GoogleAuthForm} />
+    <Route path="authentication/azure" component={SettingsAzureForm} />
     <Route path="authentication/ldap" component={SettingsLdapForm} />
     <Route
       path="authentication/saml"

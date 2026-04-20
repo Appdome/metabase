@@ -380,19 +380,31 @@
                 (when-let [raw (setting/get-value-of-type :string :azure-group-mappings)]
                   (json/decode raw)))
   :setter     (fn [new-value]
-                (cond
-                  (nil? new-value)
-                  (setting/set-value-of-type! :json :azure-group-mappings nil)
+                (let [parse-or-throw (fn [^String s]
+                                       (try
+                                         (json/decode s)
+                                         (catch Throwable _
+                                           (throw (ex-info (tru "Invalid Azure group mappings: not valid JSON.")
+                                                           {:status-code 400})))))
+                      validate!      (fn [m]
+                                       (when-not (map? m)
+                                         (throw (ex-info (tru "Invalid Azure group mappings: expected a JSON object.")
+                                                         {:status-code 400})))
+                                       m)]
+                  (cond
+                    (nil? new-value)
+                    (setting/set-value-of-type! :json :azure-group-mappings nil)
 
-                  (string? new-value)
-                  (setting/set-value-of-type! :string :azure-group-mappings new-value)
+                    (string? new-value)
+                    (setting/set-value-of-type! :string :azure-group-mappings
+                                                (json/encode (validate! (parse-or-throw new-value))))
 
-                  (map? new-value)
-                  (setting/set-value-of-type! :string :azure-group-mappings (json/encode new-value))
+                    (map? new-value)
+                    (setting/set-value-of-type! :string :azure-group-mappings (json/encode new-value))
 
-                  :else
-                  (throw (ex-info (tru "Invalid Azure group mappings: expected a JSON object.")
-                                  {:status-code 400})))))
+                    :else
+                    (throw (ex-info (tru "Invalid Azure group mappings: expected a JSON object.")
+                                    {:status-code 400}))))))
 
 (defsetting azure-user-provisioning-enabled?
   (deferred-tru "Automatically create a Metabase account for Azure-authenticated users that don''t yet have one.")

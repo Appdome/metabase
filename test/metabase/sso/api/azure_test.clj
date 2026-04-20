@@ -27,7 +27,7 @@
       (is (= client-id (:azure-client-id resp)))
       (is (nil? (:azure-client-secret resp))
           "raw client secret must not be echoed back")
-      (is (true? (:azure-client-secret-configured? resp)))
+      (is (= "configured" (:azure-client-secret-status resp)))
       (is (true? (:azure-auth-configured resp))))))
 
 (deftest put-settings-updates-admin-editable-fields-test

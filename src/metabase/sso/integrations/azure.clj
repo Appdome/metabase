@@ -84,6 +84,18 @@
           base-response))
 
       :else
-      (let [error-msg (or (:message login-result) (tru "Azure SSO authentication failed"))]
-        (log/errorf "Azure SSO authentication failed: %s" error-msg)
-        (throw (ex-info (str error-msg) {:status-code 401 :errors (:error login-result)}))))))
+      (let [error-msg   (or (:message login-result) (tru "Azure SSO authentication failed"))
+            error-key   (:error login-result)
+            ;; Distinguish bad-request (the caller's fault) from auth failure
+            ;; (the user's fault) from upstream-failure (Azure's fault). Default
+            ;; to 401 because most paths in the OIDC layer are auth checks.
+            status-code (case error-key
+                          (:invalid-callback :state-cookie-missing
+                                             :state-cookie-invalid :state-cookie-expired
+                                             :missing-code :csrf-mismatch)              400
+                          (:token-exchange-failed :discovery-failed
+                                                  :jwks-fetch-failed)                        502
+                          401)]
+        (log/errorf "Azure SSO authentication failed: %s (error=%s status=%s)"
+                    error-msg error-key status-code)
+        (throw (ex-info (str error-msg) {:status-code status-code :errors error-key}))))))

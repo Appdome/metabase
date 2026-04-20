@@ -41,37 +41,53 @@
                                        azure-client-secret "some-secret"]
       (is (true? (sso.settings/azure-auth-configured))))))
 
-(deftest azure-tenant-id-setter-rejects-multi-tenant-aliases-test
-  (testing "setter rejects common/organizations/consumers endpoint aliases"
-    (mt/with-temporary-setting-values [azure-tenant-id nil]
-      (doseq [bad ["common" "organizations" "consumers"]]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Multi-tenant Azure endpoints"
-                              (sso.settings/azure-tenant-id! bad))
-            (str "must reject " bad)))))
-  (testing "setter accepts a tenant GUID"
-    (mt/with-temporary-setting-values [azure-tenant-id nil]
-      (sso.settings/azure-tenant-id! "11111111-1111-1111-1111-111111111111")
+(deftest ^:parallel valid-azure-tenant-id?-test
+  (testing "multi-tenant endpoint aliases are rejected"
+    (is (false? (sso.settings/valid-azure-tenant-id? "common")))
+    (is (false? (sso.settings/valid-azure-tenant-id? "organizations")))
+    (is (false? (sso.settings/valid-azure-tenant-id? "consumers")))
+    (is (false? (sso.settings/valid-azure-tenant-id? nil))))
+  (testing "tenant GUIDs are accepted"
+    (is (true? (sso.settings/valid-azure-tenant-id? "11111111-1111-1111-1111-111111111111")))
+    (is (true? (sso.settings/valid-azure-tenant-id? "contoso.onmicrosoft.com")))))
+
+(deftest azure-tenant-id-getter-filters-multi-tenant-aliases-test
+  (testing "reading a multi-tenant alias from raw storage returns nil"
+    (mt/with-temporary-raw-setting-values [azure-tenant-id "common"]
+      (is (nil? (sso.settings/azure-tenant-id))))
+    (mt/with-temporary-raw-setting-values [azure-tenant-id "organizations"]
+      (is (nil? (sso.settings/azure-tenant-id))))
+    (mt/with-temporary-raw-setting-values [azure-tenant-id "consumers"]
+      (is (nil? (sso.settings/azure-tenant-id)))))
+  (testing "reading a tenant GUID returns it verbatim"
+    (mt/with-temporary-raw-setting-values [azure-tenant-id "11111111-1111-1111-1111-111111111111"]
       (is (= "11111111-1111-1111-1111-111111111111" (sso.settings/azure-tenant-id))))))
 
-(deftest azure-auth-enabled-setter-test
-  (testing "Cannot enable Azure SSO unless all mandatory settings are present"
-    (mt/with-temporary-setting-values [azure-tenant-id nil
-                                       azure-client-id nil
-                                       azure-client-secret nil
-                                       azure-auth-enabled false]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Azure SSO is not configured"
-                            (sso.settings/azure-auth-enabled! true)))))
-  (testing "Enabling works once configured"
-    (mt/with-temporary-setting-values [azure-tenant-id "11111111-1111-1111-1111-111111111111"
-                                       azure-client-id "22222222-2222-2222-2222-222222222222"
-                                       azure-client-secret "some-secret"
-                                       azure-auth-enabled false]
-      (sso.settings/azure-auth-enabled! true)
-      (is (true? (sso.settings/azure-auth-enabled)))
-      (sso.settings/azure-auth-enabled! false)
+(deftest azure-auth-enabled-requires-config-test
+  (testing "azure-auth-enabled returns false when azure-auth-configured is false"
+    (mt/with-temporary-raw-setting-values [azure-tenant-id nil
+                                           azure-client-id nil
+                                           azure-client-secret nil
+                                           azure-auth-enabled "true"]
+      (is (false? (sso.settings/azure-auth-enabled)))))
+  (testing "azure-auth-enabled reflects the raw env/setting value once configured"
+    (mt/with-temporary-raw-setting-values [azure-tenant-id "11111111-1111-1111-1111-111111111111"
+                                           azure-client-id "22222222-2222-2222-2222-222222222222"
+                                           azure-client-secret "some-secret"
+                                           azure-auth-enabled "true"]
+      (is (true? (sso.settings/azure-auth-enabled))))
+    (mt/with-temporary-raw-setting-values [azure-tenant-id "11111111-1111-1111-1111-111111111111"
+                                           azure-client-id "22222222-2222-2222-2222-222222222222"
+                                           azure-client-secret "some-secret"
+                                           azure-auth-enabled "false"]
       (is (false? (sso.settings/azure-auth-enabled))))))
+
+(deftest azure-secrets-are-not-admin-settable-test
+  (testing "`:setter :none` means the generated `!` setters are not defined"
+    (is (not (fn? (try (resolve 'metabase.sso.settings/azure-tenant-id!) (catch Throwable _ nil)))))
+    (is (not (fn? (try (resolve 'metabase.sso.settings/azure-client-id!) (catch Throwable _ nil)))))
+    (is (not (fn? (try (resolve 'metabase.sso.settings/azure-client-secret!) (catch Throwable _ nil)))))
+    (is (not (fn? (try (resolve 'metabase.sso.settings/azure-auth-enabled!) (catch Throwable _ nil)))))))
 
 (deftest azure-attribute-defaults-test
   (testing "default claim names match Azure v2 token conventions"

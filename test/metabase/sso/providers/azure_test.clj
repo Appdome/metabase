@@ -25,26 +25,28 @@
    :jwks_uri               (format "https://login.microsoftonline.com/%s/discovery/v2.0/keys" tenant-id)})
 
 (defmacro ^:private with-azure-configured [& body]
-  `(mt/with-temporary-setting-values [~'azure-tenant-id ~tenant-id
-                                      ~'azure-client-id ~client-id
-                                      ~'azure-client-secret ~client-secret
-                                      ~'azure-auth-enabled true]
+  ;; Azure secrets live behind `:setter :none` (env-only), so seed raw setting
+  ;; storage instead of going through a setter.
+  `(mt/with-temporary-raw-setting-values [~'azure-tenant-id ~tenant-id
+                                          ~'azure-client-id ~client-id
+                                          ~'azure-client-secret ~client-secret
+                                          ~'azure-auth-enabled "true"]
      ~@body))
 
 (deftest issuer-uri-test
   (testing "issuer-uri returns nil when tenant is unset"
-    (mt/with-temporary-setting-values [azure-tenant-id nil]
+    (mt/with-temporary-raw-setting-values [azure-tenant-id nil]
       (is (nil? (sso.azure/issuer-uri)))))
   (testing "issuer-uri produces the v2.0 Azure endpoint for the configured tenant"
-    (mt/with-temporary-setting-values [azure-tenant-id tenant-id]
+    (mt/with-temporary-raw-setting-values [azure-tenant-id tenant-id]
       (is (= (format "https://login.microsoftonline.com/%s/v2.0" tenant-id)
              (sso.azure/issuer-uri))))))
 
 (deftest config-for-azure-test
   (testing "returns nil when Azure settings are not fully configured"
-    (mt/with-temporary-setting-values [azure-tenant-id nil
-                                       azure-client-id nil
-                                       azure-client-secret nil]
+    (mt/with-temporary-raw-setting-values [azure-tenant-id nil
+                                           azure-client-id nil
+                                           azure-client-secret nil]
       (is (nil? (sso.azure/config-for-azure redirect-uri)))))
   (testing "returns a full OIDC config map when Azure is configured"
     (with-azure-configured

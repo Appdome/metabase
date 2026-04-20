@@ -7,6 +7,7 @@
    [metabase.util :as u]
    [metabase.util.i18n :refer [deferred-tru tru]]
    [metabase.util.json :as json]
+   [metabase.util.log :as log]
    [metabase.util.string :as u.str])
   (:import
    (com.unboundid.ldap.sdk DN)))
@@ -291,28 +292,48 @@
    configured directory."
   #{"common" "organizations" "consumers"})
 
+(defn valid-azure-tenant-id?
+  "Single-tenant guard: accept anything that isn't one of the multi-tenant
+   endpoint aliases Azure exposes. Exposed for tests."
+  [tenant-id]
+  (and (some? tenant-id)
+       (not (contains? multi-tenant-azure-aliases tenant-id))))
+
+;; Azure-specific secrets live outside the admin UI — they are infrastructure-level
+;; settings and must be provided via environment variables (`MB_AZURE_TENANT_ID`,
+;; `MB_AZURE_CLIENT_ID`, `MB_AZURE_CLIENT_SECRET`, `MB_AZURE_AUTH_ENABLED`).
+;; `:setter :none` blocks runtime mutation (admin UI, PUT /api/setting, REPL
+;; convenience setters) while leaving the env-var read path intact.
+
 (defsetting azure-tenant-id
-  (deferred-tru "Directory (tenant) ID (GUID) of the Microsoft Entra ID tenant used for Azure SSO.")
+  (deferred-tru "Directory (tenant) ID (GUID) of the Microsoft Entra ID tenant used for Azure SSO. Set via `MB_AZURE_TENANT_ID` only.")
   :encryption :when-encryption-key-set
   :visibility :public
+  :setter     :none
   :audit      :getter
-  :setter     (fn [new-value]
-                (when (and new-value (contains? multi-tenant-azure-aliases new-value))
-                  (throw (ex-info (tru "Multi-tenant Azure endpoints ({0}) are not supported. Set a specific tenant GUID." new-value)
-                                  {:status-code 400})))
-                (setting/set-value-of-type! :string :azure-tenant-id new-value)))
+  ;; A multi-tenant alias in the env var is treated as unconfigured (not thrown),
+  ;; because an install-time configuration error must not crash every request.
+  :getter     (fn []
+                (let [v (setting/get-value-of-type :string :azure-tenant-id)]
+                  (cond
+                    (nil? v) nil
+                    (valid-azure-tenant-id? v) v
+                    :else (do (log/warnf "MB_AZURE_TENANT_ID=%s is a multi-tenant alias; Azure SSO is disabled. Use a tenant GUID." v)
+                              nil)))))
 
 (defsetting azure-client-id
-  (deferred-tru "Application (client) ID of the Azure app registration used for Metabase SSO.")
+  (deferred-tru "Application (client) ID of the Azure app registration. Set via `MB_AZURE_CLIENT_ID` only.")
   :encryption :when-encryption-key-set
   :visibility :public
+  :setter     :none
   :audit      :getter)
 
 (defsetting azure-client-secret
-  (deferred-tru "Client secret configured on the Azure app registration.")
+  (deferred-tru "Client secret for the Azure app registration. Set via `MB_AZURE_CLIENT_SECRET` only.")
   :encryption :when-encryption-key-set
   :sensitive? true
   :export?    false
+  :setter     :none
   :audit      :no-value)
 
 (defsetting azure-attribute-email
@@ -388,17 +409,16 @@
                                (azure-client-secret)))))
 
 (defsetting azure-auth-enabled
-  (deferred-tru "Is Azure AD single sign-on currently enabled?")
+  (deferred-tru "Is Azure AD single sign-on currently enabled? Set via `MB_AZURE_AUTH_ENABLED` only; only takes effect when tenant, client, and secret are also configured via env.")
   :visibility :public
   :type       :boolean
   :default    false
+  :setter     :none
   :audit      :getter
-  :setter     (fn [new-value]
-                (let [new-value (boolean new-value)]
-                  (when (and new-value (not (azure-auth-configured)))
-                    (throw (ex-info (tru "Azure SSO is not configured. Set tenant ID, client ID, and client secret first.")
-                                    {:status-code 400})))
-                  (setting/set-value-of-type! :boolean :azure-auth-enabled new-value))))
+  :getter     (fn []
+                (boolean
+                 (and (azure-auth-configured)
+                      (setting/get-value-of-type :boolean :azure-auth-enabled)))))
 
 (defn- ee-sso-configured? []
   (when config/ee-available?

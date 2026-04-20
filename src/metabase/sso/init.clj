@@ -1,5 +1,6 @@
 (ns metabase.sso.init
   (:require
+   [metabase.sso.integrations.azure]
    [metabase.sso.providers.azure]
    [metabase.sso.providers.google]
    [metabase.sso.providers.ldap]

@@ -2,6 +2,7 @@
   (:require
    [metabase.api.util.handlers :as handlers]
    [metabase.config.core :as config]
+   [metabase.sso.api.azure-sso :as azure-sso.api]
    [metabase.sso.api.slack-connect :as slack-connect.api]
    [ring.util.response :as response]))
 
@@ -12,7 +13,7 @@
     (respond bad-req)))
 
 (def ^:private ee-missing-routes
-  "Fallback routes when EE is not available. Returns 'not enabled' for non-slack-connect SSO routes."
+  "Fallback routes when EE is not available. Returns 'not enabled' for SSO routes that require EE."
   (handlers/route-map-handler
    {"/auth" {"/sso" not-enabled}
     "/api"  {"/saml" not-enabled
@@ -21,10 +22,12 @@
 ;; This needs to be injected into [[metabase.server.routes/routes]] -- not [[metabase.api-routes.core/routes]] !!!
 (def routes
   "Ring routes for auth API endpoints.
-   Slack Connect (OSS) is always available. Other SSO routes (SAML, JWT, OIDC) require EE."
+   Slack Connect and Azure AD (OSS) are always available. Other SSO routes (SAML, JWT, custom OIDC) require EE."
   (handlers/routes
-   ;; Slack Connect routes always available (OSS)
-   (handlers/route-map-handler {"/auth" {"/sso" {"/slack-connect" slack-connect.api/routes}}})
+   ;; OSS SSO routes
+   (handlers/route-map-handler
+    {"/auth" {"/sso" {"/slack-connect" slack-connect.api/routes
+                      "/azure"         azure-sso.api/routes}}})
    ;; Other SSO routes require EE
    (if (and config/ee-available? (not *compile-files*))
      (requiring-resolve 'metabase-enterprise.sso.api.routes/routes)

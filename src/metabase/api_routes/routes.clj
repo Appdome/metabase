@@ -183,6 +183,7 @@
    "/frontend-errors"      metabase.frontend-errors.api/routes
    "/geojson"              'metabase.geojson.api
    "/glossary"             (+auth 'metabase.glossary.api)
+   "/azure"                (+auth metabase.sso.api/azure-routes)
    "/google"               (+auth metabase.sso.api/google-auth-routes)
    "/ldap"                 (+auth metabase.sso.api/ldap-routes)
    "/llm"                  (+auth metabase.llm.api/routes)

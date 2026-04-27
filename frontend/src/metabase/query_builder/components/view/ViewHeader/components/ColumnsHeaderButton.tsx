@@ -8,7 +8,7 @@ import {
 } from "metabase/redux/query-builder";
 import type { QueryBuilderMode } from "metabase/redux/store";
 import { Button, Icon } from "metabase/ui";
-import { useDispatch, useSelector } from "metabase/utils/redux";
+import { useDispatch, useSelector } from "metabase/redux";
 import * as Lib from "metabase-lib";
 import type Question from "metabase-lib/v1/Question";
 

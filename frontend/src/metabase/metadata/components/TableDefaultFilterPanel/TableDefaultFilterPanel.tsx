@@ -6,7 +6,7 @@ import { useMetadataToasts } from "metabase/metadata/hooks";
 import { SegmentFilterEditor } from "metabase/querying/segments/components/SegmentFilterEditor";
 import { getMetadata } from "metabase/selectors/metadata";
 import { Button, Card, Group, Stack, Text, Title } from "metabase/ui";
-import { useSelector } from "metabase/utils/redux";
+import { useSelector } from "metabase/redux";
 import * as Lib from "metabase-lib";
 import type { DatasetQuery, Table } from "metabase-types/api";
 

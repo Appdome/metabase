@@ -565,6 +565,17 @@ interface PublicSettings {
   "enable-pivoted-exports": boolean;
   "enable-sandboxes?": boolean;
   engines: Record<EngineKey, Engine>;
+  "azure-auth-enabled": boolean;
+  "azure-auth-configured": boolean;
+  "azure-tenant-id": string | null;
+  "azure-client-id": string | null;
+  "azure-attribute-email": string;
+  "azure-attribute-firstname": string;
+  "azure-attribute-lastname": string;
+  "azure-attribute-groups": string;
+  "azure-group-sync": boolean;
+  "azure-group-mappings": Record<string, number[]>;
+  "azure-user-provisioning-enabled?": boolean;
   "google-auth-client-id": string | null;
   "google-auth-enabled": boolean;
   "has-user-setup": boolean;

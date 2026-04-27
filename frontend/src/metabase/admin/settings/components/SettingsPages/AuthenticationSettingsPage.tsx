@@ -11,6 +11,7 @@ import {
 import { Box, Flex, Stack } from "metabase/ui";
 
 import { ApiKeysAuthCard } from "../../auth/components/ApiKeysAuthCard";
+import { AzureAuthCard } from "../../auth/containers/AzureAuthCard";
 import { GoogleAuthCard } from "../../auth/containers/GoogleAuthCard/GoogleAuthCard";
 import { LdapAuthCard } from "../../auth/containers/LdapAuthCard";
 import { ManageApiKeys } from "../ApiKeys/ManageApiKeys";
@@ -35,6 +36,7 @@ export function AuthenticationSettingsPage({
       <Flex justify={"space-between"} gap="lg">
         <Stack gap="lg">
           <GoogleAuthCard />
+          <AzureAuthCard />
           <LdapAuthCard />
           <ApiKeysAuthCard />
         </Stack>

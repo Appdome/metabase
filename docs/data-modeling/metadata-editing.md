@@ -65,6 +65,12 @@ You can toggle the visibility of a table by clicking on the **eye** icon next to
 
 To hide **all of the tables in a database** (say, if you've migrated to a new database), click on the **eye** icon next to the database name in the sidebar.
 
+### Default row limit
+
+In the Table metadata admin page, the **Default row limit** field caps the initial query that runs when anyone opens the table from the data browser. Useful for large tables where an unbounded initial view is slow.
+
+Set a number (e.g. 1000) to apply the cap. Leave the field empty to remove it. Users can still change or clear the limit in the Query Builder — this is a display default, not a permissions feature. Saved questions and native SQL queries are not affected.
+
 ## Field settings
 
 _Admin > Table Metadata > Database > Table > Field_
@@ -167,7 +173,10 @@ _Admin > Table Metadata > Database > Table > Field_
 
 - **Everywhere**: By default, users can see all of the columns in a table.
 - **Only in detail views**: The detail view is the view you seen when you expand a single row in a table. This will hide lengthy text from question results. This setting is applied by default if a column's values have an average length of more than 50 characters. For example, you could use this setting on a column like "Customer Comments" if you already have a column for "Customer Rating".
+- **Hidden by default**: The column is hidden the first time a user opens the table, but the user can still add it from the column picker. Use this when the column is occasionally useful but not part of the default view (for example, an internal ID column alongside friendlier name/email columns). Unlike **Only in detail views**, hidden-by-default columns remain selectable from the "Add or remove columns" picker on the table.
 - **Do not include**: Columns won't show up in the query builder or data reference. You can set this option on sensitive columns (such as PII) or irrelevant columns. But this visibility option is a simple omit/hide option; **it's not a permissions feature**. These columns are still accessible for people with native query privileges; they can write `SELECT hidden_column FROM table` or `SELECT * FROM table` in the [SQL editor](../questions/native-editor/writing-sql.md) and they'll be able to view these fields and their values.
+
+You can also set the default-visible columns in bulk from the **Default visible columns** section of the Fields tab in the Table Metadata admin page. Use **Show all** / **Hide all** to flip every togglable field at once; rows with **Only in detail views** or **Do not include** are disabled in that panel because their visibility is already controlled by the dropdown.
 
 To restrict what data people can view and query, see [data permissions](../permissions/data.md).
 

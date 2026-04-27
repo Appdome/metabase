@@ -10,6 +10,8 @@
    [metabase.driver.settings :as driver.settings]
    [metabase.driver.util :as driver.u]
    [metabase.events.core :as events]
+   ;; loaded for its `::Filter` malli schema referenced in the PUT body.
+   [metabase.legacy-mbql.schema]
    [metabase.lib.core :as lib]
    [metabase.lib.metadata :as lib.metadata]
    [metabase.lib.schema.id :as lib.schema.id]
@@ -184,20 +186,49 @@
                                (fn [response]
                                  (dissoc response :json_query :context :cached :average_execution_time))))))))))
 
+(defn- merge-table-settings
+  "Shallow-merge `incoming` into `existing` Table settings map. Keys in `incoming` whose value is `nil` are dropped so
+  callers can clear individual keys without wiping the whole blob. Nested maps are replaced wholesale -- shallow only.
+  If `incoming` is `nil`, return `nil` (wipe); if it's an empty map, return `existing` unchanged (idempotent merge)."
+  [existing incoming]
+  (cond
+    (nil? incoming) nil
+    (empty? incoming) existing
+    :else (reduce-kv (fn [m k v] (if (nil? v) (dissoc m k) (assoc m k v)))
+                     (or existing {})
+                     incoming)))
+
+(defn- compute-settings-change
+  "Return the next value to persist for Table `:settings` given the request `body`, re-reading the current persisted
+  value inside the surrounding transaction to narrow the lost-update window. Returns `::no-change` when the body does
+  not touch `:settings` at all."
+  [table-id body]
+  (if-not (contains? body :settings)
+    ::no-change
+    (let [incoming (:settings body)]
+      (if (nil? incoming)
+        nil
+        (let [fresh-settings (:settings (t2/select-one :model/Table :id table-id))]
+          (merge-table-settings fresh-settings incoming))))))
+
 (mu/defn ^:private update-table!*
   "Takes an existing table and the changes, updates in the database and optionally calls `table/update-field-positions!`
-  if field positions have changed."
+  if field positions have changed. Read-modify-write for `:settings` is done inside the surrounding transaction but
+  without `FOR UPDATE`; two admins editing different keys concurrently can still lose an update -- acceptable for V1."
   [{:keys [id] :as existing-table} :- [:map [:id ::lib.schema.id/table]]
    body]
-  (when-let [changes (-> body
-                         (u/select-keys-when
-                          :non-nil [:display_name :show_in_getting_started :entity_type :field_order]
-                          :present [:description :caveats :points_of_interest :visibility_type
-                                    :data_layer :data_authority :data_source :owner_email :owner_user_id])
-                         (u/update-some :data_layer keyword)
-                         (u/update-some :data_source keyword)
-                         not-empty)]
-    (t2/update! :model/Table id changes))
+  (let [settings-change (compute-settings-change id body)]
+    (when-let [changes (-> body
+                           (u/select-keys-when
+                            :non-nil [:display_name :show_in_getting_started :entity_type :field_order]
+                            :present [:description :caveats :points_of_interest :visibility_type
+                                      :data_layer :data_authority :data_source :owner_email :owner_user_id])
+                           (u/update-some :data_layer keyword)
+                           (u/update-some :data_source keyword)
+                           (cond-> (not= settings-change ::no-change)
+                             (assoc :settings settings-change))
+                           not-empty)]
+      (t2/update! :model/Table id changes)))
   (let [updated-table        (t2/select-one :model/Table :id id)
         changed-field-order? (not= (:field_order updated-table) (:field_order existing-table))]
     (if changed-field-order?
@@ -262,7 +293,11 @@
             [:data_source             {:optional true} [:maybe :string]]
             [:data_layer              {:optional true} [:maybe :string]]
             [:owner_email             {:optional true} [:maybe :string]]
-            [:owner_user_id           {:optional true} [:maybe :int]]]]
+            [:owner_user_id           {:optional true} [:maybe :int]]
+            [:settings                {:optional true} [:maybe [:map
+                                                                {:closed true}
+                                                                [:default_row_limit     {:optional true} [:maybe ms/PositiveInt]]
+                                                                [:default_filter_clause {:optional true} [:maybe [:ref :metabase.legacy-mbql.schema/Filter]]]]]]]]
   (first (update-tables! [id] body)))
 
 ;; TODO (Cam 2025-11-25) please add a response schema to this API endpoint, it makes it easier for our customers to

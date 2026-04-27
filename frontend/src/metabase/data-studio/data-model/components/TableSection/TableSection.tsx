@@ -10,8 +10,11 @@ import { EmptyState } from "metabase/common/components/EmptyState";
 import { ForwardRefLink } from "metabase/common/components/Link";
 import { trackDependencyEntitySelected } from "metabase/data-studio/analytics";
 import {
+  DefaultColumnsSection,
   FieldOrderPicker,
   NameDescriptionInput,
+  TableDefaultFilterPanel,
+  TableDefaultsPanel,
 } from "metabase/metadata/components";
 import { ResponsiveButton } from "metabase/metadata/components/ResponsiveButton";
 import { TableFieldList } from "metabase/metadata/components/TableFieldList";
@@ -333,6 +336,14 @@ const TableSectionBase = ({
 
               <TableAttributesEditSingle table={table} onUpdate={onUpdate} />
 
+              {isConcreteTableId(table.id) && (
+                <TableDefaultsPanel table={table} />
+              )}
+
+              {isConcreteTableId(table.id) && (
+                <TableDefaultFilterPanel table={table} />
+              )}
+
               <TableSectionGroup title={t`Metadata`}>
                 <TableMetadata table={table} />
               </TableSectionGroup>
@@ -378,6 +389,10 @@ const TableSectionBase = ({
                   message={t`This table has no fields`}
                   spacing="sm"
                 />
+              )}
+
+              {hasFields && !isSorting && (
+                <DefaultColumnsSection table={table} />
               )}
 
               {hasFields && (

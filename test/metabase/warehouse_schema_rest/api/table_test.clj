@@ -720,6 +720,109 @@
       (is (=? {:metrics [(assoc metric :type "metric" :display "table")]}
               (mt/user-http-request :rasta :get 200 (format "table/%d/query_metadata" (mt/id :categories))))))))
 
+(deftest hidden-by-default-query-metadata-test
+  (testing "GET /api/table/:id/query_metadata returns fields with :hidden-by-default like :normal fields"
+    (mt/with-temp-vals-in-db :model/Field (mt/id :venues :price) {:visibility_type :hidden-by-default}
+      (let [field-names (set (for [f (:fields (mt/user-http-request :rasta :get 200
+                                                                    (format "table/%d/query_metadata" (mt/id :venues))))]
+                               (:name f)))]
+        (is (contains? field-names "PRICE")
+            ":hidden-by-default fields must be returned in query metadata so the column picker can list them")))))
+
+(deftest update-table-settings-default-row-limit-test
+  (testing "PUT /api/table/:id accepts :settings.default_row_limit, merges, and round-trips"
+    (mt/with-temp [:model/Database db    {:details (:details (mt/db))}
+                   :model/Table    table (-> (t2/select-one :model/Table (mt/id :venues))
+                                             (dissoc :id :entity_id)
+                                             (assoc :db_id (:id db)))]
+      (let [table-id (:id table)
+            put      (fn [body] (mt/user-http-request :crowberto :put 200
+                                                      (format "table/%d" table-id) body))
+            get-     (fn [] (mt/user-http-request :crowberto :get 200 (format "table/%d" table-id)))]
+
+        (testing "initial settings is nil"
+          (is (nil? (:settings (get-)))))
+
+        (testing "sets default_row_limit"
+          (put {:settings {:default_row_limit 1000}})
+          (is (= {:default_row_limit 1000} (:settings (get-)))))
+
+        (testing "shallow-merges — other keys preserved when only one changes"
+          ;; write a second, unrelated key directly (feature 003 will go here eventually)
+          (t2/update! :model/Table table-id {:settings {:default_row_limit 1000
+                                                        :custom_key        "hello"}})
+          (put {:settings {:default_row_limit 500}})
+          (is (= {:default_row_limit 500 :custom_key "hello"} (:settings (get-)))))
+
+        (testing "nil value on a key drops that key from settings"
+          (put {:settings {:default_row_limit nil}})
+          (is (= {:custom_key "hello"} (:settings (get-)))))
+
+        (testing "top-level settings nil wipes the whole blob"
+          (put {:settings nil})
+          (is (nil? (:settings (get-)))))))
+
+    (testing "rejects non-positive values"
+      (mt/with-temp [:model/Table {table-id :id} {:db_id (mt/id)}]
+        (mt/user-http-request :crowberto :put 400 (format "table/%d" table-id)
+                              {:settings {:default_row_limit 0}})
+        (mt/user-http-request :crowberto :put 400 (format "table/%d" table-id)
+                              {:settings {:default_row_limit -5}})))
+
+    (testing "rejects unknown keys inside :settings (schema is closed)"
+      (mt/with-temp [:model/Table {table-id :id} {:db_id (mt/id)}]
+        (mt/user-http-request :crowberto :put 400 (format "table/%d" table-id)
+                              {:settings {:some_unknown_key "hi"}})))
+
+    (testing "empty settings map is idempotent (no wipe)"
+      (mt/with-temp [:model/Table {table-id :id} {:db_id (mt/id)}]
+        (t2/update! :model/Table table-id {:settings {:default_row_limit 100}})
+        (mt/user-http-request :crowberto :put 200 (format "table/%d" table-id)
+                              {:settings {}})
+        (is (= {:default_row_limit 100}
+               (:settings (mt/user-http-request :crowberto :get 200
+                                                (format "table/%d" table-id)))))))))
+
+(deftest update-table-settings-default-filter-clause-test
+  (testing "PUT /api/table/:id accepts :settings.default_filter_clause, validates as MBQL Filter"
+    (mt/with-temp [:model/Database db    {:details (:details (mt/db))}
+                   :model/Table    table (-> (t2/select-one :model/Table (mt/id :venues))
+                                             (dissoc :id :entity_id)
+                                             (assoc :db_id (:id db)))]
+      (let [table-id (:id table)
+            put      (fn [status body] (mt/user-http-request :crowberto :put status
+                                                             (format "table/%d" table-id) body))
+            get-     (fn [] (mt/user-http-request :crowberto :get 200 (format "table/%d" table-id)))
+            price-id (mt/id :venues :price)]
+
+        ;; NOTE: settings are persisted as JSON. Legacy MBQL keywords and vectors
+        ;; round-trip as strings and lists respectively. Downstream consumers are
+        ;; expected to renormalise via `mbql.normalize/normalize-tokens`
+        ;; (frontend: `Lib.fromLegacyFilterClause`).
+        (testing "sets a valid filter clause"
+          (put 200 {:settings {:default_filter_clause [:= [:field price-id nil] 4]}})
+          (is (= ["=" ["field" price-id nil] 4]
+                 (:default_filter_clause (:settings (get-))))))
+
+        (testing "sets a relative-date time-interval clause"
+          (put 200 {:settings {:default_filter_clause [:time-interval [:field price-id nil] -7 :day]}})
+          (is (= ["time-interval" ["field" price-id nil] -7 "day"]
+                 (:default_filter_clause (:settings (get-))))))
+
+        (testing "coexists with default_row_limit on the same table"
+          (put 200 {:settings {:default_row_limit 500}})
+          (is (=? {:default_row_limit 500
+                   :default_filter_clause ["time-interval" ["field" price-id nil] -7 "day"]}
+                  (:settings (get-)))))
+
+        (testing "clearing only the filter preserves row limit"
+          (put 200 {:settings {:default_filter_clause nil}})
+          (is (= {:default_row_limit 500} (:settings (get-)))))
+
+        (testing "rejects malformed filter clauses"
+          (put 400 {:settings {:default_filter_clause [:nope]}})
+          (put 400 {:settings {:default_filter_clause "not-a-vector"}}))))))
+
 (deftest ^:parallel table-segment-query-metadata-test
   (testing "GET /api/table/:id/query_metadata"
     (testing "segments include :definition_description"

@@ -57,46 +57,23 @@
 (methodical/defmethod auth-identity/authenticate :around :provider/azure
   [provider request]
   (let [cfg      (sso.azure/config-for-azure (:redirect-uri request))
-        _ (log/errorf "DEBUG azure-authn :around-pre cfg-present?=%s :code?=%s :state?=%s"
-                      (some? cfg) (some? (:code request)) (some? (:state request)))
         request' (cond-> request
-                   cfg (assoc :oidc-config cfg))
-        raw      (next-method provider request')
-        _ (log/errorf "DEBUG azure-authn raw-result keys=%s :success?=%s :error=%s :message=%s :user-data?=%s :claims?=%s"
-                      (vec (keys raw)) (:success? raw) (:error raw) (:message raw)
-                      (some? (:user-data raw)) (some? (:claims raw)))
-        post     (post-process-authentication-result raw)]
-    (log/errorf "DEBUG azure-authn post-result keys=%s :success?=%s :error=%s"
-                (vec (keys post)) (:success? post) (:error post))
-    post))
+                   cfg (assoc :oidc-config cfg))]
+    (post-process-authentication-result (next-method provider request'))))
 
-(methodical/defmethod auth-identity/login! :before :provider/azure
-  [_provider request]
-  ;; Refuse to auto-create a Metabase account when provisioning is disabled.
-  ;; The generic `:around login!` populates `:user-data` (from authenticate) and
-  ;; looks `:user` up by email; if `:user-data` is set but `:user` is nil, the
-  ;; next step would be `create-user!` from the `::create-user-if-not-exists`
-  ;; mixin. Throw before that happens.
+(methodical/defmethod auth-identity/login! :around :provider/azure
+  [provider request]
+  ;; The provisioning-disabled guard and group sync both live in this single
+  ;; `:around`. A `:before` aux would be cleaner, but in methodical 1.0.127 the
+  ;; `:before` return value replaces the request the primary chain receives —
+  ;; returning `nil` (when the guard's condition is false) blanks the request
+  ;; and the primary gets `{}`. Folded in here to keep the request intact.
   (when (and (:user-data request)
              (not (:user request))
              (not (sso.settings/azure-user-provisioning-enabled?)))
     (throw (ex-info (tru "You don''t have a Metabase account yet. Ask your administrator to invite you.")
-                    {:status-code 401}))))
-
-(methodical/defmethod auth-identity/login! :around :provider/azure
-  [provider request]
-  (log/errorf "DEBUG azure-login :around-pre request keys=%s :code?=%s :state?=%s :user-data?=%s :user?=%s"
-              (vec (keys request))
-              (some? (:code request)) (some? (:state request))
-              (some? (:user-data request)) (some? (:user request)))
-  (let [result (try
-                 (next-method provider request)
-                 (catch Throwable e
-                   (log/errorf e "DEBUG azure-login :around next-method threw")
-                   (throw e)))]
-    (log/errorf "DEBUG azure-login :around-post result keys=%s :success?=%s :error=%s :message=%s"
-                (vec (keys result))
-                (:success? result) (:error result) (:message result))
+                    {:status-code 401})))
+  (let [result (next-method provider request)]
     ;; Only the callback branch carries `:claims`; the initiate branch returns
     ;; `:success? :redirect` with no claims, so gating on `:claims` cleanly
     ;; scopes group sync to completed logins.

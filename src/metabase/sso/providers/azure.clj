@@ -61,21 +61,18 @@
                    cfg (assoc :oidc-config cfg))]
     (post-process-authentication-result (next-method provider request'))))
 
-(methodical/defmethod auth-identity/login! :before :provider/azure
-  [_provider request]
-  ;; Refuse to auto-create a Metabase account when provisioning is disabled.
-  ;; The generic `:around login!` populates `:user-data` (from authenticate) and
-  ;; looks `:user` up by email; if `:user-data` is set but `:user` is nil, the
-  ;; next step would be `create-user!` from the `::create-user-if-not-exists`
-  ;; mixin. Throw before that happens.
+(methodical/defmethod auth-identity/login! :around :provider/azure
+  [provider request]
+  ;; The provisioning-disabled guard and group sync both live in this single
+  ;; `:around`. A `:before` aux would be cleaner, but in methodical 1.0.127 the
+  ;; `:before` return value replaces the request the primary chain receives —
+  ;; returning `nil` (when the guard's condition is false) blanks the request
+  ;; and the primary gets `{}`. Folded in here to keep the request intact.
   (when (and (:user-data request)
              (not (:user request))
              (not (sso.settings/azure-user-provisioning-enabled?)))
     (throw (ex-info (tru "You don''t have a Metabase account yet. Ask your administrator to invite you.")
-                    {:status-code 401}))))
-
-(methodical/defmethod auth-identity/login! :around :provider/azure
-  [provider request]
+                    {:status-code 401})))
   (let [result (next-method provider request)]
     ;; Only the callback branch carries `:claims`; the initiate branch returns
     ;; `:success? :redirect` with no claims, so gating on `:claims` cleanly

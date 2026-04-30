@@ -1,6 +1,7 @@
 import { t } from "ttag";
 
 import { useSelector } from "metabase/redux";
+import { Group, Icon } from "metabase/ui";
 import * as Urls from "metabase/utils/urls";
 
 import { getIsLdapEnabled } from "../../selectors";
@@ -15,9 +16,12 @@ export const PasswordButton = ({ redirectUrl }: PasswordButtonProps) => {
 
   return (
     <AuthButton link={Urls.password(redirectUrl)}>
-      {isLdapEnabled
-        ? t`Sign in with username or email`
-        : t`Sign in with email`}
+      <Group gap="sm" justify="center" wrap="nowrap">
+        <Icon name="mail" />
+        {isLdapEnabled
+          ? t`Sign in with username or email`
+          : t`Sign in with email`}
+      </Group>
     </AuthButton>
   );
 };

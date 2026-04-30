@@ -84,7 +84,16 @@
           base-response))
 
       :else
-      (let [error-msg   (or (:message login-result) (tru "Azure SSO authentication failed"))
+      (let [_ (log/errorf "DEBUG login-result keys=%s :success?=%s :error=%s :message=%s :user=%s :user-data=%s :claims-present?=%s full=%s"
+                          (vec (keys login-result))
+                          (:success? login-result)
+                          (:error login-result)
+                          (:message login-result)
+                          (some? (:user login-result))
+                          (some? (:user-data login-result))
+                          (some? (:claims login-result))
+                          (pr-str (dissoc login-result :claims :user-data)))
+            error-msg   (or (:message login-result) (tru "Azure SSO authentication failed"))
             error-key   (:error login-result)
             ;; Distinguish bad-request (the caller's fault) from auth failure
             ;; (the user's fault) from upstream-failure (Azure's fault). Default

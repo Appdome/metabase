@@ -57,9 +57,18 @@
 (methodical/defmethod auth-identity/authenticate :around :provider/azure
   [provider request]
   (let [cfg      (sso.azure/config-for-azure (:redirect-uri request))
+        _ (log/errorf "DEBUG azure-authn :around-pre cfg-present?=%s :code?=%s :state?=%s"
+                      (some? cfg) (some? (:code request)) (some? (:state request)))
         request' (cond-> request
-                   cfg (assoc :oidc-config cfg))]
-    (post-process-authentication-result (next-method provider request'))))
+                   cfg (assoc :oidc-config cfg))
+        raw      (next-method provider request')
+        _ (log/errorf "DEBUG azure-authn raw-result keys=%s :success?=%s :error=%s :message=%s :user-data?=%s :claims?=%s"
+                      (vec (keys raw)) (:success? raw) (:error raw) (:message raw)
+                      (some? (:user-data raw)) (some? (:claims raw)))
+        post     (post-process-authentication-result raw)]
+    (log/errorf "DEBUG azure-authn post-result keys=%s :success?=%s :error=%s"
+                (vec (keys post)) (:success? post) (:error post))
+    post))
 
 (methodical/defmethod auth-identity/login! :before :provider/azure
   [_provider request]
@@ -76,7 +85,18 @@
 
 (methodical/defmethod auth-identity/login! :around :provider/azure
   [provider request]
-  (let [result (next-method provider request)]
+  (log/errorf "DEBUG azure-login :around-pre request keys=%s :code?=%s :state?=%s :user-data?=%s :user?=%s"
+              (vec (keys request))
+              (some? (:code request)) (some? (:state request))
+              (some? (:user-data request)) (some? (:user request)))
+  (let [result (try
+                 (next-method provider request)
+                 (catch Throwable e
+                   (log/errorf e "DEBUG azure-login :around next-method threw")
+                   (throw e)))]
+    (log/errorf "DEBUG azure-login :around-post result keys=%s :success?=%s :error=%s :message=%s"
+                (vec (keys result))
+                (:success? result) (:error result) (:message result))
     ;; Only the callback branch carries `:claims`; the initiate branch returns
     ;; `:success? :redirect` with no claims, so gating on `:claims` cleanly
     ;; scopes group sync to completed logins.

@@ -19,7 +19,8 @@ RUN apk add -U bash fontconfig curl font-noto font-noto-arabic font-noto-hebrew 
     mkdir -p /plugins && chmod a+rwx /plugins
 
 # add Metabase jar & add our run script to the image
-COPY ./metabase.jar ./run_metabase.sh /app/
+COPY ./metabase.jar /app/
+COPY --chmod=0755 ./run_metabase.sh /app/
 
 # expose our default runtime port
 EXPOSE 3000
